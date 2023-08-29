@@ -1,42 +1,61 @@
 import librosa
 import mido
-from mido import MidiFile, MidiTrack, Message
-import numpy as np
 
-def convert_wav_to_midi(input_filename, output_filename, bpm):
-    # Load the WAV file with the original sampling rate
-    y, sr = librosa.load(input_filename, sr=None)
+# Load the audio file
+audio_file = 'MusicTest/FrankSinatra.wav'
+y, sr = librosa.load(audio_file)
 
-    # Estimate pitches using the Constant-Q chromagram
-    chromagram = librosa.feature.chroma_cqt(y=y, sr=sr)
+# Estimate note onsets and pitches
+onset_frames = librosa.onset.onset_detect(y=y, sr=sr)
+pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
 
-    # Find the most dominant pitch in each frame
-    dominant_pitches = np.argmax(chromagram, axis=0)
-    midi_notes = dominant_pitches + 21  # Shift pitches to MIDI note numbers (A0 is MIDI note 21)
+# Create MIDI messages
+output_midi = mido.MidiFile()
 
-    # Estimate dynamics: MIDI velocity and note duration based on average RMS
-    rms = librosa.feature.rms(y=y)[0]
-    avg_rms = np.mean(rms)
-    velocity = int(127 * avg_rms)  # Scale the average RMS to MIDI velocity range (0-127)
-    note_duration = 0.5 * (avg_rms / np.max(rms))  # Adjust note duration based on dynamics
+# Add a new MIDI track
+track = mido.MidiTrack()
+output_midi.tracks.append(track)
 
-    # Create MIDI messages with the calculated velocity and note duration
-    midi_messages = []
-    for note in midi_notes:
-        note_on = Message('note_on', note=note, velocity=velocity, time=0)
-        note_off = Message('note_off', note=note, velocity=0, time=int(bpm * note_duration * 60))
-        midi_messages.extend([note_on, note_off])
+# Set the tempo in microseconds per beat (500000 microseconds per beat = 120 BPM)
+tempo = mido.bpm2tempo(120)
+track.append(mido.MetaMessage('set_tempo', tempo=tempo))
 
-    # Create and save the MIDI file
-    output_midi = MidiFile()
-    track = MidiTrack()
-    output_midi.tracks.append(track)
-    for msg in midi_messages:
-        track.append(msg)
-    output_midi.save(output_filename)
+# Store active notes
+active_notes = set()
 
-if __name__ == "__main__":
-    input_filename = 'MusicTest/FrankSinatra.wav'
-    output_filename = 'output.mid'
-    bpm = 120
-    convert_wav_to_midi(input_filename, output_filename, bpm)
+# Add note events
+for frame in onset_frames:
+    new_notes = set()
+    for pitch_idx in range(pitches.shape[0]):
+        frequency = pitches[pitch_idx, frame]
+        if frequency > 0:
+            note_number = int(round(librosa.hz_to_midi(frequency)))
+            if 0 <= note_number <= 127:
+                new_notes.add(note_number)
+
+    # Find notes that need to be turned off
+    notes_to_turn_off = active_notes - new_notes
+
+    # Turn off notes that are no longer active
+    for note_number in notes_to_turn_off:
+        note_off = mido.Message('note_off', note=note_number, velocity=64, time=0)
+        track.append(note_off)
+        active_notes.remove(note_number)
+
+    # Turn on new notes and add them to active_notes
+    for note_number in new_notes:
+        if note_number not in active_notes:
+            note_on = mido.Message('note_on', note=note_number, velocity=64, time=0)
+            track.append(note_on)
+            active_notes.add(note_number)
+
+    # Calculate the time_advance
+    frame_duration_ms = 0.01
+    time_advance = int(sr * frame_duration_ms)
+
+    for note_number in active_notes:
+        note_off = mido.Message('note_off', note=note_number, velocity=64, time=time_advance)
+        track.append(note_off)
+
+# Save the MIDI file
+output_midi.save('Frank.mid')
