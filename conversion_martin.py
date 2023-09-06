@@ -1,14 +1,15 @@
 import librosa
 import mido
 
-INPUT = "./MusicTest/FrankSinatra.wav"
+INPUT = "./MusicTest/Music_Audio.wav"
 OUTPUT = "./results/test.mid"
-ABS_TRESHOLD = 15
-TRESHOLD = 0.8
+ABS_TRESHOLD = 30
+TRESHOLD = 0.7
 
 data, sr = librosa.load(INPUT)
 data = librosa.to_mono(data)
 tempo = int(librosa.feature.tempo(y=data)[0])
+tempo = 240
 print("Tempo is : ", tempo)
 # This indicate the number of frames to take into account to
 # analyse 1 beat
@@ -24,6 +25,8 @@ track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo)))
 
 nbrOfBeat = int((len(data) - (len(data) % framePerBeat)) / framePerBeat)
 
+maxAmp = []
+
 print("Song got", nbrOfBeat, " beats")
 
 activeNotes = []
@@ -36,10 +39,11 @@ for b in range(0, nbrOfBeat):
     pitches, magnitudes = librosa.piptrack(y=currentData, sr=sr)
     notes = []
     maxMag = magnitudes.max()
+    maxAmp.append(maxMag)
     for i in range(0, len(pitches)):
         for j in range(0, len(pitches[i])):
             if(pitches[i][j] != 0.0):
-                if(magnitudes[i][j] < ABS_TRESHOLD and magnitudes[i][j] < maxMag * TRESHOLD):
+                if(magnitudes[i][j] < ABS_TRESHOLD):
                     continue
                 midiNote = round(librosa.hz_to_midi(pitches[i][j]))
                 if notes.count(midiNote) == 0:
@@ -68,3 +72,4 @@ for b in range(0, nbrOfBeat):
 
 midiOut.tracks.append(track)
 midiOut.save(OUTPUT)
+print(maxAmp)
